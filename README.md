@@ -26,6 +26,48 @@ Each link always downloads the newest version.
 
 On Linux, macOS and Android, make the file executable before running it: `chmod +x cf-scanner-*`
 
+## Running on Android (Termux)
+
+Android has no way to run a command-line program by tapping it, so you need **Termux**, a free terminal app.
+
+**1. Install Termux.** Get it from [F-Droid](https://f-droid.org/packages/com.termux/) or the [Termux GitHub releases](https://github.com/termux/termux-app/releases) (pick the `arm64-v8a` APK). Don't use the Google Play version: it is outdated and often broken.
+
+**2. Check that your phone is 64-bit ARM.** Open Termux and run:
+
+```bash
+uname -m
+```
+
+It should print `aarch64`. Almost every phone from the last several years does.
+
+**3. Get the scanner.** Either download it directly inside Termux:
+
+```bash
+pkg install curl
+curl -LO https://github.com/proarash/go-cf-scanner/releases/latest/download/cf-scanner-android-arm64
+```
+
+Or, if you already downloaded it with your browser, copy it from the Download folder:
+
+```bash
+termux-setup-storage
+cp ~/storage/downloads/cf-scanner-android-arm64 ~/
+cd ~
+```
+
+`termux-setup-storage` asks for storage permission; allow it. You have to copy the file into the Termux home folder (`~`), because Android doesn't let programs run directly from shared storage.
+
+**4. Make it executable and run it:**
+
+```bash
+chmod +x cf-scanner-android-arm64
+./cf-scanner-android-arm64
+```
+
+All the [flags](#flags) work the same way, for example `./cf-scanner-android-arm64 -bots 150 -timeout 2s`. On mobile data, keep `-bots` low (`100`–`200`) so your connection isn't throttled.
+
+Results are saved to `hits.txt` in the Termux home folder. To see them: `cat hits.txt`. To copy them to your phone's Download folder: `cp hits.txt ~/storage/downloads/`.
+
 ## Build
 
 ```bash
@@ -75,16 +117,29 @@ While it runs you see a live status line:
 [Progress]: 0.06% | [Count]: 986 | [Hits]: 6 | Press CTRL + C to stop
 ```
 
-When it finishes, reaches the hit limit, or you press `CTRL + C`, it prints the fastest IPs it found:
+When it finishes, reaches the hit limit, or you press `CTRL + C`, it prints the fastest IPs it found, a clean list of just the IPs for copy-pasting, and where the results file is:
 
 ```text
-Fastest 3 hits (all saved to hits.txt):
+Fastest 3 of 3 working IPs:
   104.20.198.43   224ms
   172.67.229.204  234ms
   172.69.65.116   240ms
+
+Clean IPs (ready to copy):
+
+104.20.198.43
+172.67.229.204
+172.69.65.116
+
+All 3 working IPs from this scan were saved to:
+  /home/user/hits.txt
+
+Press any key to exit...
 ```
 
-Every hit is also added to `hits.txt` as soon as it is found, one per line as `IP latency_in_ms`. The file is appended to and never cleared, so results from earlier runs stay in it.
+The window stays open until you press a key, so the results don't disappear when you start the program by double-clicking it.
+
+Every hit is also added to `hits.txt` in the folder you ran the program from, as soon as it is found, one per line as `IP latency_in_ms`. The file is appended to and never cleared, so results from earlier runs stay in it.
 
 ## Flags
 

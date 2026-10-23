@@ -9,6 +9,9 @@ import (
 	"github.com/proarash/go-cf-scanner/internal/scanner"
 )
 
+// HitsFile is where every hit is appended, relative to the working directory.
+const HitsFile = "hits.txt"
+
 // SaveHits appends every hit to hits.txt as soon as it arrives, calls onHit, and returns all hits
 // sorted by latency on done once the hits channel is closed.
 func SaveHits(hits <-chan scanner.Hit, onHit func(), done chan<- []scanner.Hit) {
@@ -18,7 +21,7 @@ func SaveHits(hits <-chan scanner.Hit, onHit func(), done chan<- []scanner.Hit) 
 		done <- all
 	}()
 
-	file, err := os.OpenFile("hits.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(HitsFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Println(err)
 	}

@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"github.com/proarash/go-cf-scanner/internal/cloudflare"
 	"github.com/proarash/go-cf-scanner/internal/report"
 	"github.com/proarash/go-cf-scanner/internal/scanner"
+	"golang.org/x/term"
 )
 
 func main() {
@@ -105,7 +107,11 @@ func main() {
 			stop()
 		}
 	}, allHits)
-	go report.UpdateProgress(total, &progress, &hitCount, progressDone)
+	progressExited := make(chan struct{})
+	go func() {
+		defer close(progressExited)
+		report.UpdateProgress(total, &progress, &hitCount, progressDone)
+	}()
 
 	var wg sync.WaitGroup
 	for range *bots {
@@ -116,7 +122,6 @@ func main() {
 	go func() {
 		defer close(jobs)
 		// Visit every index exactly once in pseudo-random order: i -> (a*i + c) mod total, gcd(a, total) == 1.
-		// total is a power of two here only for a single prefix, so a just needs to be odd there; we check gcd generally.
 		a, c := uint64(1), uint64(0)
 		if selection == 0 {
 			for {
@@ -149,7 +154,8 @@ func main() {
 	close(hits)
 	found := <-allHits
 	close(progressDone)
-	time.Sleep(10 * time.Millisecond) // let the final progress line print
+	<-progressExited
+	defer waitForKey()
 
 	switch {
 	case limitReached.Load():
@@ -160,12 +166,45 @@ func main() {
 		log.Println("Scan completed.")
 	}
 
-	if len(found) > 0 {
-		fmt.Printf("Fastest %d hits (all saved to hits.txt):\n", min(*top, len(found)))
-		for _, hit := range found[:min(*top, len(found))] {
-			fmt.Printf("  %-15s %v\n", hit.IP, hit.Latency.Round(time.Millisecond))
-		}
+	if len(found) == 0 {
+		fmt.Println("\nNo working IPs found. Try another range, a longer -timeout or fewer -bots.")
+		return
 	}
+
+	best := found[:min(*top, len(found))]
+	fmt.Printf("\nFastest %d of %d working IPs:\n", len(best), len(found))
+	for _, hit := range best {
+		fmt.Printf("  %-15s %v\n", hit.IP, hit.Latency.Round(time.Millisecond))
+	}
+
+	fmt.Println("\nClean IPs (ready to copy):")
+	fmt.Println()
+	for _, hit := range best {
+		fmt.Println(hit.IP)
+	}
+
+	hitsPath, err := filepath.Abs(report.HitsFile)
+	if err != nil {
+		hitsPath = report.HitsFile
+	}
+	fmt.Printf("\nAll %d working IPs from this scan were saved to:\n  %s\n", len(found), hitsPath)
+}
+
+// waitForKey keeps the window open until a key is pressed, so results stay visible when the
+// program was started by double-clicking. It does nothing when stdin is not a terminal.
+func waitForKey() {
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		return
+	}
+	fmt.Print("\nPress any key to exit...")
+	state, err := term.MakeRaw(fd)
+	if err != nil {
+		return
+	}
+	defer term.Restore(fd, state)
+	os.Stdin.Read(make([]byte, 1))
+	fmt.Print("\r\n")
 }
 
 func gcd(a, b uint64) uint64 {
