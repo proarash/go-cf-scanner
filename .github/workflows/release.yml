@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags: [ "v*" ]
+
+permissions:
+  contents: write
+
+jobs:
+
+  release:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Build
+      run: sh scripts/build.sh
+
+    - name: Checksums
+      run: cd out && sha256sum cf-scanner-* > checksums.txt
+
+    - name: Upload release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        # checkout turns annotated tags into lightweight ones, so fetch the real tag to read its message
+        git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+        notes=""
+        if [ "$(git cat-file -t "$GITHUB_REF_NAME")" = tag ]; then
+          notes="$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME")"
+        fi
+        gh release create "$GITHUB_REF_NAME" out/* --title "$GITHUB_REF_NAME" --notes "$notes" --generate-notes

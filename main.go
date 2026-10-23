@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"math/rand/v2"
@@ -12,7 +13,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/proarash/go-cf-scanner/internal/cloudflare"
 	"github.com/proarash/go-cf-scanner/internal/report"
@@ -20,20 +23,26 @@ import (
 )
 
 func main() {
-	reader := bufio.NewReader(os.Stdin)
-	bots := 100
-	timeout := 3
-	var wg sync.WaitGroup
+	bots := flag.Int("bots", 500, "number of concurrent workers")
+	timeout := flag.Duration("timeout", time.Second, "per-IP timeout (e.g. 800ms, 2s)")
+	maxHits := flag.Uint64("hits", 10, "stop after this many hits (0 = scan everything)")
+	useTLS := flag.Bool("tls", false, "also require a successful TLS handshake (default: TCP connect only)")
+	useHTTP := flag.Bool("http", false, "also require TLS + HTTP 200 from /cdn-cgi/trace (implies -tls)")
+	sni := flag.String("sni", "cloudflare.com", "SNI / Host used by -tls and -http")
+	port := flag.Int("port", 443, "port to probe")
+	top := flag.Int("top", 10, "number of fastest hits to print at the end")
+	flag.Parse()
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	jobs := make(chan string, 2000)
-	done := make(chan struct{})
-	progress := make(chan uint64, 1000)
-	hits := make(chan string, 1000)
-	doneHits := make(chan struct{})
-	hitCounter := make(chan uint8, 16)
+	cfg := scanner.Config{Port: *port, Timeout: *timeout, Mode: scanner.ModeTCP, SNI: *sni}
+	switch {
+	case *useHTTP:
+		cfg.Mode = scanner.ModeHTTP
+	case *useTLS:
+		cfg.Mode = scanner.ModeTLS
+	}
+	if *bots < 1 {
+		log.Fatalf("-bots must be at least 1")
+	}
 
 	ips := cloudflare.Ip4Ranges()
 	fmt.Println("[0] Randomize and scan all")
@@ -41,86 +50,132 @@ func main() {
 		fmt.Printf("[%v] %v\n", index+1, ip)
 	}
 	fmt.Printf("Select CIDR to scan: ")
-	input, err := reader.ReadString('\n')
+	input, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	input = strings.TrimSpace(input)
-
-	if err != nil {
-		panic(err)
+	if err != nil && input == "" {
+		log.Fatalf("failed to read selection: %v", err)
+	}
+	selection, err := strconv.Atoi(input)
+	if err != nil || selection < 0 || selection > len(ips) {
+		log.Fatalf("invalid selection %q, expected a number between 0 and %d", input, len(ips))
 	}
 
-	log.Printf("Bots: %v | Timeout: %v second(s)\n", bots, timeout)
-	selection, err := strconv.ParseInt(input, 0, 8)
-	if err != nil {
-		panic(err)
-	}
-	if input == "0" {
-		log.Printf("Selected %v, it would shuffle the CIDR then scan all of them.\n", input)
-	} else {
-		log.Printf("Selected %v | %v\n", input, ips[selection-1])
-	}
-
-	var totalIpCount uint64 = 0
-
-	go report.SaveHits(doneHits, hits)
-
-	for range bots {
-		wg.Add(1)
-		go scanner.ScanWorker(jobs, &wg, timeout, progress, hits, ctx, hitCounter)
-	}
-	// extract the ip range
 	var prefixes []netip.Prefix
-	if input == "0" {
-		rand.Shuffle(len(ips), func(i, j int) {
-			ips[i], ips[j] = ips[j], ips[i]
-		})
+	if selection == 0 {
+		log.Println("Selected 0, scanning all ranges in random order.")
 		for _, cidr := range ips {
 			prefix, err := netip.ParsePrefix(cidr)
 			if err != nil {
 				log.Println(err)
 				continue
 			}
-			prefixes = append(prefixes, prefix)
+			prefixes = append(prefixes, prefix.Masked())
 		}
 	} else {
+		log.Printf("Selected %v | %v\n", selection, ips[selection-1])
 		prefix, err := netip.ParsePrefix(ips[selection-1])
 		if err != nil {
-			panic(err)
+			log.Fatal(err)
 		}
-		prefixes = append(prefixes, prefix)
-	}
-	for _, prefix := range prefixes {
-		count := 1 << (32 - prefix.Bits())
-		totalIpCount += uint64(count)
+		prefixes = append(prefixes, prefix.Masked())
 	}
 
-	go report.UpdateProgress(&totalIpCount, progress, done, hitCounter, stop)
+	// offsets[i] is the global index of the first IP in prefixes[i]
+	offsets := make([]uint64, len(prefixes))
+	var total uint64
+	for i, prefix := range prefixes {
+		offsets[i] = total
+		total += 1 << (32 - prefix.Bits())
+	}
+
+	log.Printf("Bots: %v | Timeout: %v | Mode: %v | Total IPs: %v\n", *bots, *timeout, cfg.Mode, total)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	jobs := make(chan string, *bots*2)
+	hits := make(chan scanner.Hit, *bots)
+	allHits := make(chan []scanner.Hit, 1)
+	progressDone := make(chan struct{})
+	var progress, hitCount atomic.Uint64
+	var limitReached atomic.Bool
+
+	go report.SaveHits(hits, func() {
+		if n := hitCount.Add(1); *maxHits > 0 && n >= *maxHits && !limitReached.Swap(true) {
+			stop()
+		}
+	}, allHits)
+	go report.UpdateProgress(total, &progress, &hitCount, progressDone)
+
+	var wg sync.WaitGroup
+	for range *bots {
+		wg.Add(1)
+		go scanner.ScanWorker(ctx, &wg, cfg, jobs, &progress, hits)
+	}
+
 	go func() {
 		defer close(jobs)
-		for _, prefix := range prefixes {
-			ip := prefix.Masked().Addr()
-			count := 1 << (32 - prefix.Bits())
-			for range count {
-				select {
-				case jobs <- ip.String():
-					ip = ip.Next()
-				case <-ctx.Done():
-					return
+		// Visit every index exactly once in pseudo-random order: i -> (a*i + c) mod total, gcd(a, total) == 1.
+		// total is a power of two here only for a single prefix, so a just needs to be odd there; we check gcd generally.
+		a, c := uint64(1), uint64(0)
+		if selection == 0 {
+			for {
+				a = rand.Uint64N(total-1) + 1
+				if gcd(a, total) == 1 {
+					break
 				}
+			}
+			c = rand.Uint64N(total)
+		}
+		for i := range total {
+			idx := (mulmod(a, i, total) + c) % total
+			p := len(offsets) - 1
+			for offsets[p] > idx {
+				p--
+			}
+			addr := prefixes[p].Addr().As4()
+			n := uint32(addr[0])<<24 | uint32(addr[1])<<16 | uint32(addr[2])<<8 | uint32(addr[3])
+			n += uint32(idx - offsets[p])
+			ip := netip.AddrFrom4([4]byte{byte(n >> 24), byte(n >> 16), byte(n >> 8), byte(n)})
+			select {
+			case jobs <- ip.String():
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()
+
 	wg.Wait()
-
 	close(hits)
-	close(done)
-	close(hitCounter)
+	found := <-allHits
+	close(progressDone)
+	time.Sleep(10 * time.Millisecond) // let the final progress line print
 
-	<-hitCounter
-	<-doneHits
-
-	if ctx.Err() != nil {
-		fmt.Printf("Scan cancelled.\n")
-	} else {
+	switch {
+	case limitReached.Load():
+		log.Printf("Reached %d hits, stopping.", *maxHits)
+	case ctx.Err() != nil:
+		log.Println("Scan cancelled.")
+	default:
 		log.Println("Scan completed.")
 	}
+
+	if len(found) > 0 {
+		fmt.Printf("Fastest %d hits (all saved to hits.txt):\n", min(*top, len(found)))
+		for _, hit := range found[:min(*top, len(found))] {
+			fmt.Printf("  %-15s %v\n", hit.IP, hit.Latency.Round(time.Millisecond))
+		}
+	}
+}
+
+func gcd(a, b uint64) uint64 {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
+}
+
+// mulmod is safe from overflow because total IP count is well below 2^32.
+func mulmod(a, b, m uint64) uint64 {
+	return (a % m) * (b % m) % m
 }

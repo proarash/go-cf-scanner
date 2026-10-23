@@ -3,9 +3,23 @@ package scanner
 import (
 	"context"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
-func ScanWorker(jobs <-chan string, wg *sync.WaitGroup, timeout int, progress chan<- uint64, hits chan<- string, ctx context.Context, hitCounter chan<- uint8) {
+type Config struct {
+	Port    int
+	Timeout time.Duration
+	Mode    Mode
+	SNI     string
+}
+
+type Hit struct {
+	IP      string
+	Latency time.Duration
+}
+
+func ScanWorker(ctx context.Context, wg *sync.WaitGroup, cfg Config, jobs <-chan string, progress *atomic.Uint64, hits chan<- Hit) {
 	defer wg.Done()
 	for {
 		select {
@@ -13,16 +27,14 @@ func ScanWorker(jobs <-chan string, wg *sync.WaitGroup, timeout int, progress ch
 			if !ok {
 				return
 			}
-			valid := GetTcping(ip, 443, timeout, ctx)
-			if valid {
-				hits <- ip
+			if latency, ok := Probe(ctx, ip, cfg.Port, cfg.Timeout, cfg.Mode, cfg.SNI); ok {
 				select {
-				case hitCounter <- 1:
+				case hits <- Hit{IP: ip, Latency: latency}:
 				case <-ctx.Done():
 					return
 				}
 			}
-			progress <- 1
+			progress.Add(1)
 		case <-ctx.Done():
 			return
 		}

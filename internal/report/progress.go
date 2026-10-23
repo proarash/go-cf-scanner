@@ -1,44 +1,29 @@
 package report
 
 import (
-	"context"
 	"fmt"
-	"log"
+	"sync/atomic"
 	"time"
 )
 
-func UpdateProgress(total *uint64, progress <-chan uint64, done chan struct{}, hitCounter <-chan uint8, cancelFunc context.CancelFunc) {
+func UpdateProgress(total uint64, progress, hitCount *atomic.Uint64, done <-chan struct{}) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	var currentProgress uint64 = 0
-	var hitsCount uint8 = 0
-
-	log.Printf("Started scanning total %v IPs", *total)
+	print := func() {
+		current := progress.Load()
+		percent := float64(current) * 100 / float64(max(total, 1))
+		fmt.Printf("\r[Progress]: %.2f%% | [Count]: %d | [Hits]: %d | Press CTRL + C to stop", percent, current, hitCount.Load())
+	}
 
 	for {
 		select {
 		case <-done:
-			log.Printf("Done")
+			print()
+			fmt.Println()
 			return
-		case value, ok := <-hitCounter:
-			if ok {
-				hitsCount += value
-				if hitsCount == 10 {
-					log.Printf("about  >= %v success hits, closing program.\n", hitsCount)
-					cancelFunc()
-					return
-				}
-			}
-		case value, ok := <-progress:
-			if ok {
-				currentProgress += value
-			}
 		case <-ticker.C:
-			if *total > 0 {
-				current := float32(currentProgress) * 100.0 / float32(*total)
-				fmt.Printf("\r[Progress]: %.2f%% | [Count]: %d | Press CTRL + C to stop the program", current, currentProgress)
-			}
+			print()
 		}
 	}
 }
