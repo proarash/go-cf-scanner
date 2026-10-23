@@ -1,8 +1,30 @@
 # Go Cloudflare IP Scanner
 
+[![Latest release](https://img.shields.io/github/v/release/proarash/go-cf-scanner?label=latest&style=flat-square)](https://github.com/proarash/go-cf-scanner/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/proarash/go-cf-scanner/total?style=flat-square)](https://github.com/proarash/go-cf-scanner/releases)
+[![Build](https://img.shields.io/github/actions/workflow/status/proarash/go-cf-scanner/go.yml?branch=main&style=flat-square)](https://github.com/proarash/go-cf-scanner/actions)
+
+[![Windows](https://img.shields.io/badge/Windows-x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/proarash/go-cf-scanner/releases/latest/download/cf-scanner-windows-x64.exe)
+[![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/proarash/go-cf-scanner/releases/latest/download/cf-scanner-macos-arm64)
+[![Linux](https://img.shields.io/badge/Linux-x64-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/proarash/go-cf-scanner/releases/latest/download/cf-scanner-linux-x64)
+[![Android](https://img.shields.io/badge/Android-ARM64-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/proarash/go-cf-scanner/releases/latest/download/cf-scanner-android-arm64)
+
 This program scans Cloudflare's IPv4 ranges to find IP addresses that are reachable from **your** network. It is built for heavily filtered networks (such as Iran during internet blackouts), where only some Cloudflare IPs get through, and those IPs change depending on the ISP, the city and the day.
 
 The IPs it finds can be used as the "clean IP" (the address you connect to) in proxy setups that run behind Cloudflare, such as v2Ray, Xray or a VLESS/VMess config with a CDN.
+
+## Download
+
+Each link always downloads the newest version.
+
+| OS | Downloads |
+| --- | --- |
+| Windows | [x64](https://github.com/proarash/go-cf-scanner/releases/latest/download/cf-scanner-windows-x64.exe) · [ARM64](https://github.com/proarash/go-cf-scanner/releases/latest/download/cf-scanner-windows-arm64.exe) · [x86 (32-bit)](https://github.com/proarash/go-cf-scanner/releases/latest/download/cf-scanner-windows-x86.exe) |
+| macOS | [Apple Silicon (M1+)](https://github.com/proarash/go-cf-scanner/releases/latest/download/cf-scanner-macos-arm64) · [Intel](https://github.com/proarash/go-cf-scanner/releases/latest/download/cf-scanner-macos-x64) |
+| Linux | [x64](https://github.com/proarash/go-cf-scanner/releases/latest/download/cf-scanner-linux-x64) · [ARM64](https://github.com/proarash/go-cf-scanner/releases/latest/download/cf-scanner-linux-arm64) · [ARM (32-bit)](https://github.com/proarash/go-cf-scanner/releases/latest/download/cf-scanner-linux-arm) · [x86 (32-bit)](https://github.com/proarash/go-cf-scanner/releases/latest/download/cf-scanner-linux-x86) |
+| Android | [ARM64 (Termux)](https://github.com/proarash/go-cf-scanner/releases/latest/download/cf-scanner-android-arm64) |
+
+On Linux, macOS and Android, make the file executable before running it: `chmod +x cf-scanner-*`
 
 ## Build
 
@@ -22,7 +44,7 @@ sh scripts/build.sh            # Linux / macOS / Git Bash
 pwsh scripts/build.ps1         # Windows PowerShell
 ```
 
-The binaries are written to `out/`, named `cf-scanner-<os>-<arch>`, for example `cf-scanner-windows-x64.exe`, `cf-scanner-linux-arm64` or `cf-scanner-macos-arm64`. The scripts build for Windows (x86, x64, arm64), every Linux architecture Go supports, macOS (x64, arm64) and Android (arm64). They also add `CGO_ENABLED=0` (no C dependencies, so the binaries run on any system), `-buildvcs=false` and `-buildid=` so the binaries are smaller and carry no build-machine details.
+The binaries are written to `out/`, named `cf-scanner-<os>-<arch>`, for example `cf-scanner-windows-x64.exe`, `cf-scanner-linux-arm64` or `cf-scanner-macos-arm64`. The scripts build for Windows (x86, x64, arm64), Linux (x64, x86, arm64, 32-bit arm), macOS (x64, arm64) and Android (arm64). They also add `CGO_ENABLED=0` (no C dependencies, so the binaries run on any system), `-buildvcs=false` and `-buildid=` so the binaries are smaller and carry no build-machine details.
 
 Android builds for x86, x64 and 32-bit arm are not included, because Go can only build them with the Android NDK (C toolchain) installed. On Android, run the `arm64` binary from a terminal app such as Termux.
 

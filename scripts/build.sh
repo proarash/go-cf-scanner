@@ -6,8 +6,8 @@ mkdir -p out
 
 # android 386/amd64/arm need cgo + the Android NDK, so only arm64 is built
 TARGETS="
-windows/386 windows/amd64 windows/arm64
-linux/386 linux/amd64 linux/arm linux/arm64 linux/loong64 linux/mips linux/mips64 linux/mips64le linux/mipsle linux/ppc64 linux/ppc64le linux/riscv64 linux/s390x
+windows/amd64 windows/386 windows/arm64
+linux/amd64 linux/386 linux/arm64 linux/arm
 darwin/amd64 darwin/arm64
 android/arm64
 "
